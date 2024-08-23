@@ -1,0 +1,6 @@
+2024/08/23-17:20:56.725 490c Creating DB C:\Users\Rafael\AppData\Local\Google\Chrome\User Data\Profile 5\IndexedDB\https_www.globo.com_0.indexeddb.leveldb since it was missing.
+2024/08/23-17:20:56.757 490c Reusing MANIFEST C:\Users\Rafael\AppData\Local\Google\Chrome\User Data\Profile 5\IndexedDB\https_www.globo.com_0.indexeddb.leveldb/MANIFEST-000001
+2024/08/23-17:20:57.061 2c9c Level-0 table #5: started
+2024/08/23-17:20:57.077 2c9c Level-0 table #5: 1299 bytes OK
+2024/08/23-17:20:57.089 2c9c Delete type=0 #3
+2024/08/23-17:20:57.091 490c Manual compaction at level-0 from '\x00\x01\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x02\x00\x00\x00' @ 0 : 0; will stop at (end)

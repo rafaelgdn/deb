@@ -1,0 +1,5 @@
+2024/08/23-17:14:34.026 490c Creating DB C:\Users\Rafael\AppData\Local\Google\Chrome\User Data\Profile 5\IndexedDB\https_mail.google.com_0.indexeddb.leveldb since it was missing.
+2024/08/23-17:14:34.048 490c Reusing MANIFEST C:\Users\Rafael\AppData\Local\Google\Chrome\User Data\Profile 5\IndexedDB\https_mail.google.com_0.indexeddb.leveldb/MANIFEST-000001
+2024/08/23-17:17:57.065 240c Level-0 table #5: started
+2024/08/23-17:17:57.172 240c Level-0 table #5: 2998875 bytes OK
+2024/08/23-17:17:57.182 240c Delete type=0 #3
