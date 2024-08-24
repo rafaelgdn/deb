@@ -1,8 +1,10 @@
 from selenium_driverless import webdriver
+from selenium_driverless.types.webelement import StaleElementReferenceException
 import os
 import time
 import shutil
 import random
+import asyncio
 
 
 def setup_temp_profile():
@@ -36,10 +38,11 @@ def setup_temp_profile():
     return temp_dir_abspath, profile_name
 
 
-async def start_driver():
+async def start_driver(downloads_dir=None):
     temp_dir_abspath, profile_name = setup_temp_profile()
 
     options = webdriver.ChromeOptions()
+    options.downloads_dir = downloads_dir
     options.user_data_dir = temp_dir_abspath
     options.add_argument(f"--user-data-dir={temp_dir_abspath}")
     options.add_argument(f"--profile-directory={profile_name}")
@@ -103,11 +106,15 @@ async def wait_for_element(driver, by, CSS, timeout=30):
     start_time = time.time()
 
     while True:
-        element = await driver.find_elements(by, CSS)
-        if element:
-            return element
-        elif time.time() - start_time > timeout:
-            raise TimeoutError(f"Element with {by}={CSS} not found within {timeout} seconds")
+        try:
+            element = await driver.find_elements(by, CSS)
+            if element:
+                return element
+            elif time.time() - start_time > timeout:
+                raise TimeoutError(f"Element with {by}={CSS} not found within {timeout} seconds")
+        except StaleElementReferenceException:
+            if time.time() - start_time > timeout:
+                raise TimeoutError(f"Element with {by}={CSS} not found within {timeout} seconds")
 
 
 async def get_element_details(driver, element):
@@ -137,3 +144,10 @@ async def get_element_details(driver, element):
 
     details = {**attributes, **properties}
     return details
+
+
+async def race(*coroutines):
+    done, pending = await asyncio.wait(coroutines, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    return done.pop().result()

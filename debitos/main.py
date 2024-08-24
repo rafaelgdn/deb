@@ -1,5 +1,4 @@
-from utils import start_driver, move_mouse_around_element, type_with_delay, wait_for_element
-from utils.exposed_promise import create_exposed_promise
+from utils import move_mouse_around_element, type_with_delay, wait_for_element, race
 from utils.intercept_request import intercept_request
 from selenium_driverless.types.by import By
 import re
@@ -38,8 +37,19 @@ async def main(driver, pdf_exposed_promise):
     submit_element = await driver.find_element(By.CSS_SELECTOR, "#validar")
 
     await move_mouse_around_element(driver, submit_element)
-
     await submit_element.click()
+    await driver.sleep(10)
+
+    element = await race(
+        wait_for_element(driver, By.CSS_SELECTOR, "a[href*='Emitir/EmProcessamento']"),
+        wait_for_element(driver, By.CSS_SELECTOR, "input[type='button'][value='Nova consulta']"),
+    )
+
+    if element.tag_name == "a":
+        await element.click()
+        element = await wait_for_element(driver, By.CSS_SELECTOR, "input[type='button'][value='Nova consulta']")
+
+    print(element.text)
 
     await driver.sleep(999999)
 
