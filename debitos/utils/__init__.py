@@ -1,5 +1,5 @@
 from selenium_driverless import webdriver
-from selenium_driverless.types.webelement import StaleElementReferenceException
+from selenium_driverless.types.webelement import StaleElementReferenceException, NoSuchElementException
 import os
 import time
 import shutil
@@ -35,20 +35,24 @@ def setup_temp_profile():
         shutil.rmtree(dest_profile)
 
     shutil.copytree(source_profile, dest_profile)
-    return temp_dir_abspath, profile_name
+    return temp_dir_abspath, profile_name, current_dir_abspath
 
 
-async def start_driver(downloads_dir=None):
-    temp_dir_abspath, profile_name = setup_temp_profile()
+async def start_driver():
+    temp_dir_abspath, profile_name, current_dir_abspath = setup_temp_profile()
+
+    downloads_dir = os.path.join(current_dir_abspath, "..", "downloads")
+    downloads_dir_abspath = os.path.abspath(downloads_dir)
 
     options = webdriver.ChromeOptions()
-    options.downloads_dir = downloads_dir
+    options.downloads_dir = downloads_dir_abspath
     options.user_data_dir = temp_dir_abspath
     options.add_argument(f"--user-data-dir={temp_dir_abspath}")
     options.add_argument(f"--profile-directory={profile_name}")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--detach")
     # options.add_argument("--headless")  # uncomment this line to run in headless mode
-    options.add_argument("--disable-gpu")  # comment to run in a cloud
+    # options.add_argument("--disable-gpu")  # uncomment to run in a cloud
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-infobars")
@@ -65,7 +69,9 @@ async def start_driver(downloads_dir=None):
         "--disable-features=ImprovedCookieControls,LaxSameSiteCookies,SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure"
     )
     options.add_argument("--disable-features=SameSiteDefaultChecksMethodRigorously")
+
     driver = await webdriver.Chrome(options=options)
+    # await driver.set_download_behaviour("allow", path=downloads_dir_abspath)
     return driver
 
 
@@ -74,10 +80,10 @@ async def move_mouse_around_element(driver, element, num_movements=6):
     size = await element.size
     pointer = driver.current_pointer
 
-    x_min = max(0, location["x"] - 200)
-    x_max = location["x"] + size["width"] + 200
-    y_min = max(0, location["y"] - 200)
-    y_max = location["y"] + size["height"] + 200
+    x_min = max(0, location["x"] - 50)
+    x_max = location["x"] + size["width"] + 50
+    y_min = max(0, location["y"] - 50)
+    y_max = location["y"] + size["height"] + 50
 
     for _ in range(num_movements):
         x = random.randint(x_min, x_max)
@@ -107,43 +113,14 @@ async def wait_for_element(driver, by, CSS, timeout=30):
 
     while True:
         try:
-            element = await driver.find_elements(by, CSS)
+            element = await driver.find_element(by, CSS)
             if element:
                 return element
-            elif time.time() - start_time > timeout:
-                raise TimeoutError(f"Element with {by}={CSS} not found within {timeout} seconds")
-        except StaleElementReferenceException:
-            if time.time() - start_time > timeout:
-                raise TimeoutError(f"Element with {by}={CSS} not found within {timeout} seconds")
+        except (StaleElementReferenceException, NoSuchElementException):
+            pass
 
-
-async def get_element_details(driver, element):
-    attributes = await driver.execute_script(
-        """
-            var items = {};
-            for (index = 0; index < arguments[0].attributes.length; ++index) {
-                items[arguments[0].attributes[index].name] = arguments[0].attributes[index].value
-            };
-            return items;
-        """,
-        element,
-    )
-
-    properties = await driver.execute_script(
-        """
-            var props = {};
-            var element = arguments[0];
-            props['tagName'] = element.tagName;
-            props['text'] = element.textContent;
-            props['isDisplayed'] = element.offsetParent !== null;
-            props['isEnabled'] = !element.disabled;
-            return props;
-        """,
-        element,
-    )
-
-    details = {**attributes, **properties}
-    return details
+        if time.time() - start_time > timeout:
+            raise TimeoutError(f"Element with {by}={CSS} not found within {timeout} seconds")
 
 
 async def race(*coroutines):
