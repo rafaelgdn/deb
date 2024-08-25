@@ -108,14 +108,14 @@ async def type_with_delay(driver, element, text, min_delay=0.2, max_delay=0.5):
     await driver.sleep(0.5)
 
 
-async def wait_for_element(driver, by, CSS, timeout=30):
+async def wait_for_element(driver, by, CSS, response, timeout=30):
     start_time = time.time()
 
     while True:
         try:
-            element = await driver.find_element(by, CSS)
+            element = await driver.find_element(by, CSS, timeout=3)
             if element:
-                return element
+                return response
         except (StaleElementReferenceException, NoSuchElementException):
             pass
 
