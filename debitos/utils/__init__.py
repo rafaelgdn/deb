@@ -1,4 +1,5 @@
 from selenium_driverless import webdriver
+from selenium_driverless.types.by import By
 from selenium_driverless.types.webelement import StaleElementReferenceException, NoSuchElementException
 import os
 import time
@@ -10,12 +11,17 @@ import asyncio
 def setup_temp_profile():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     current_dir_abspath = os.path.abspath(current_dir)
+
     root_dir = os.path.join(current_dir_abspath, "..")
     root_dir_abspath = os.path.abspath(root_dir)
 
     profiles_dir = os.path.join(root_dir_abspath, "utils", "profiles")
+
     temp_dir = os.path.join(root_dir_abspath, "profiles_temp")
     temp_dir_abspath = os.path.abspath(temp_dir)
+
+    downloads_dir = os.path.join(current_dir_abspath, "..", "downloads")
+    downloads_dir_abspath = os.path.abspath(downloads_dir)
 
     profile_name = "Profile 5"
 
@@ -28,6 +34,15 @@ def setup_temp_profile():
 
     os.makedirs(temp_dir_abspath, exist_ok=True)
 
+    if os.path.exists(downloads_dir_abspath):
+        try:
+            shutil.rmtree(downloads_dir_abspath)
+            print("Downloads folder successfully removed.")
+        except Exception as e:
+            print(f"Error removing temp folder: {e}")
+
+    os.makedirs(temp_dir_abspath, exist_ok=True)
+
     source_profile = os.path.join(profiles_dir, profile_name)
     dest_profile = os.path.join(temp_dir_abspath, profile_name)
 
@@ -35,14 +50,11 @@ def setup_temp_profile():
         shutil.rmtree(dest_profile)
 
     shutil.copytree(source_profile, dest_profile)
-    return temp_dir_abspath, profile_name, current_dir_abspath
+    return temp_dir_abspath, profile_name, downloads_dir_abspath
 
 
 async def start_driver():
-    temp_dir_abspath, profile_name, current_dir_abspath = setup_temp_profile()
-
-    downloads_dir = os.path.join(current_dir_abspath, "..", "downloads")
-    downloads_dir_abspath = os.path.abspath(downloads_dir)
+    temp_dir_abspath, profile_name, downloads_dir_abspath = setup_temp_profile()
 
     options = webdriver.ChromeOptions()
     options.downloads_dir = downloads_dir_abspath
@@ -71,7 +83,6 @@ async def start_driver():
     options.add_argument("--disable-features=SameSiteDefaultChecksMethodRigorously")
 
     driver = await webdriver.Chrome(options=options)
-    # await driver.set_download_behaviour("allow", path=downloads_dir_abspath)
     return driver
 
 
@@ -113,7 +124,7 @@ async def wait_for_element(driver, by, CSS, response, timeout=30):
 
     while True:
         try:
-            element = await driver.find_element(by, CSS, timeout=3)
+            element = await driver.find_element(by, CSS, timeout=2)
             if element:
                 return response
         except (StaleElementReferenceException, NoSuchElementException):
@@ -126,5 +137,25 @@ async def wait_for_element(driver, by, CSS, response, timeout=30):
 async def race(*coroutines):
     done, pending = await asyncio.wait(coroutines, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
-        task.cancel()
+        if not isinstance(task, asyncio.Future) or not hasattr(task, "_is_resolved"):
+            task.cancel()
     return done.pop().result()
+
+
+async def click_and_check(css, driver):
+    retries = 0
+
+    while retries < 10:
+        retries += 1
+        current_url = await driver.current_url
+        element = await driver.find_element(By.CSS_SELECTOR, css)
+        await element.click()
+        await driver.sleep(2)
+        new_url = await driver.current_url
+        if new_url != current_url:
+            return
+        await driver.refresh()
+        await driver.sleep(2)
+
+    if retries >= 10:
+        raise Exception("Failed to click the element after multiple attempts")

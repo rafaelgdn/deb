@@ -7,7 +7,6 @@ file_download_script = r"""
                 originalFileDownload = $.fileDownload;
                 $.extend({
                     fileDownload: function (fileUrl, options) {
-                      console.error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
                       //provide some reasonable defaults to any unspecified options below
                       var settings = $.extend({
 
@@ -162,9 +161,6 @@ file_download_script = r"""
                       var internalCallbacks = {
 
                           onPrepare: function (url) {
-
-                              console.log("onPrepare: " + url);
-                              console.error("onPrepare: " + url);
 
                               //wire up a jquery dialog to display the preparing message if specified
                               if (settings.preparingMessageHtml) {
