@@ -69,17 +69,30 @@ async def submit_and_verify(driver, verify_url=True):
             retries += 1
             current_url = await driver.current_url
             input_element = await driver.find_element(By.CSS_SELECTOR, "#NI")
+
             await input_element.clear()
             await move_mouse_around_element(driver, input_element, num_movements=1)
             await type_with_delay(driver, input_element, doc)
+
             submit_element = await driver.find_element(By.CSS_SELECTOR, "#validar")
+
             await submit_element.click()
             await driver.sleep(5)
+
+            new_url = await driver.current_url
+
+            if current_url == new_url:
+                is_invalid_doc = await driver.find_elements(By.CSS_SELECTOR, "#mensagem")
+                text = await is_invalid_doc[0].text
+                if "inválido" in text:
+                    return "doc_invalid"
+
             if not verify_url:
                 return
-            new_url = await driver.current_url
+
             if new_url != current_url:
                 return
+
             await driver.refresh()
             await driver.sleep(2)
         except Exception:
@@ -303,7 +316,17 @@ async def get_page_response(
     wait_page_response,
     wait_processing_page_loaded,
 ):
-    await submit_and_verify(driver)
+    verify_response = await submit_and_verify(driver)
+
+    if verify_response == "doc_invalid":
+        result = {
+            "document": doc,
+            "obs": "Documento inválido",
+            "file": None,
+        }
+        wait_page_response.resolve(result)
+        await driver.refresh()
+        return
 
     await handle_page_errors(
         driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded, wait_emit_page_processing
@@ -436,6 +459,9 @@ async def main():
                     break
 
                 if wait_result_page_processing.is_resolved():
+                    break
+
+                if wait_page_response.is_resolved():
                     break
             except Exception:
                 pass
