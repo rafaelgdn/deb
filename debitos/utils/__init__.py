@@ -1,6 +1,5 @@
 from selenium_driverless import webdriver
 from selenium_driverless.types.by import By
-from selenium_driverless.types.webelement import StaleElementReferenceException, NoSuchElementException
 import os
 import time
 import shutil
@@ -127,7 +126,7 @@ async def wait_for_element(driver, by, CSS, response, timeout=30):
             element = await driver.find_element(by, CSS, timeout=2)
             if element:
                 return response
-        except (StaleElementReferenceException, NoSuchElementException):
+        except Exception:
             pass
 
         if time.time() - start_time > timeout:

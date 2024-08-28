@@ -4,6 +4,7 @@ import time
 import base64
 import asyncio
 import argparse
+from bs4 import BeautifulSoup
 from selenium_driverless.types.by import By
 from utils.exposed_promise import create_exposed_promise
 from utils.file_download_script import file_download_script
@@ -39,6 +40,7 @@ url = f"https://solucoes.receita.fazenda.gov.br/Servicos/CertidaoInternet/{p_typ
 emit_url = f"https://solucoes.receita.fazenda.gov.br/Servicos/certidaointernet/{p_type}/Emitir/Verificar"
 result_url = f"https://solucoes.receita.fazenda.gov.br/Servicos/certidaointernet/{p_type}/Emitir/ResultadoEmissao/"
 processing_url = f"https://solucoes.receita.fazenda.gov.br/Servicos/certidaointernet/{p_type}/Emitir/EmProcessamento"
+result_html = None
 
 
 async def on_request(data: InterceptedRequest):
@@ -57,6 +59,31 @@ def handle_console_event(message, wait_pdf_download):
         and not wait_pdf_download.is_resolved()
     ):
         wait_pdf_download.resolve("pdf_downloaded")
+
+
+async def submit_and_verify(driver, verify_url=True):
+    retries = 0
+
+    while retries < 10:
+        retries += 1
+        current_url = await driver.current_url
+        input_element = await driver.find_element(By.CSS_SELECTOR, "#NI")
+        await input_element.clear()
+        await move_mouse_around_element(driver, input_element, num_movements=1)
+        await type_with_delay(driver, input_element, doc)
+        submit_element = await driver.find_element(By.CSS_SELECTOR, "#validar")
+        await submit_element.click()
+        await driver.sleep(2)
+        if not verify_url:
+            return
+        new_url = await driver.current_url
+        if new_url != current_url:
+            return
+        await driver.refresh()
+        await driver.sleep(2)
+
+    if retries >= 10:
+        raise Exception("Failed to submit the form after multiple attempts")
 
 
 async def handle_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded):
@@ -102,6 +129,18 @@ async def handle_result_page_errors(driver, wait_pdf_download, wait_result_page_
         if wait_pdf_download.is_resolved() or wait_result_page_processing.is_resolved():
             return
 
+        current_url = await driver.current_url
+
+        if retries >= 2 and (url in current_url or emit_url in current_url):
+            has_input = await driver.find_elements(By.CSS_SELECTOR, "#NI")
+            if has_input:
+                has_dialog_button = await driver.find_elements(By.CSS_SELECTOR, "#dialog-message + div button")
+                if has_dialog_button:
+                    await has_dialog_button[0].click()
+                    await driver.sleep(0.5)
+                await submit_and_verify(driver, verify_url=False)
+                await driver.sleep(6)
+
         print("Result page error, retrying...")
         await driver.refresh()
         await driver.sleep(5 + retries)
@@ -115,20 +154,70 @@ async def is_result_page(driver, timeout=30):
     while time.time() - start_time < timeout:
         try:
             url = await driver.current_url
-            if result_url in url or processing_url in url:
-                return "result_page"
+            if result_url in url or processing_url in url or emit_url in url:
+                if emit_url not in url:
+                    return "result_page"
+                try:
+                    await driver.sleep(1)
+                    link_exists = await driver.find_elements(By.CSS_SELECTOR, "a[href*='Emitir/EmProcessamento']")
+                    if link_exists:
+                        return "emit_page"
+                    else:
+                        return "result_page"
+                except Exception:
+                    return "result_page"
             await driver.sleep(1)
         except Exception:
             pass
 
 
+def extract_message(text):
+    text_clear = text.strip()
+    rows = text_clear.split("\n")
+    rows_with_content = [row.strip() for row in rows if row.strip()]
+    if rows_with_content:
+        return rows_with_content[-1]
+    else:
+        return "No message found."
+
+
+def extract_message_from_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    message_element = soup.css.select("#rfb-main-container > div")
+    if message_element:
+        text = message_element[0].text.strip()
+        message = extract_message(text)
+        return message
+    else:
+        return "No message found."
+
+
 async def get_result_infos(driver, wait_pdf_download, wait_result_page_processing, result=None):
+    global result_html
     print("Getting result infos...")
     await handle_result_page_errors(driver, wait_pdf_download, wait_result_page_processing)
 
     if wait_pdf_download.is_resolved():
+        print("pdf promise resolved...")
         result = await handle_pdf_download()
+        return result
 
+    if wait_result_page_processing.is_resolved():
+        print("result page promise resolved...")
+        if result_html:
+            message = extract_message_from_html(result_html)
+        else:
+            await wait_for_element(driver, By.CSS_SELECTOR, "#rfb-main-container > div", "none")
+            main_container = await driver.find_element(By.CSS_SELECTOR, "#rfb-main-container > div")
+            text = await main_container.text
+            message = extract_message(text)
+
+        return {
+            "document": doc,
+            "obs": message,
+            "file": None,
+        }
+    print(f"result: {result}")
     return result
 
 
@@ -142,28 +231,6 @@ async def configure_cdp(driver, wait_pdf_download):
     await driver.add_cdp_listener(
         "Runtime.consoleAPICalled", lambda message: handle_console_event(message, wait_pdf_download)
     )
-
-
-async def submit_and_verify(driver):
-    retries = 0
-
-    while retries < 10:
-        retries += 1
-        current_url = await driver.current_url
-        input_element = await driver.find_element(By.CSS_SELECTOR, "#NI")
-        await move_mouse_around_element(driver, input_element, num_movements=1)
-        await type_with_delay(driver, input_element, doc)
-        submit_element = await driver.find_element(By.CSS_SELECTOR, "#validar")
-        await submit_element.click()
-        await driver.sleep(2)
-        new_url = await driver.current_url
-        if new_url != current_url:
-            return
-        await driver.refresh()
-        await driver.sleep(2)
-
-    if retries >= 10:
-        raise Exception("Failed to submit the form after multiple attempts")
 
 
 async def solve_image_captcha(driver):
@@ -306,7 +373,7 @@ async def main():
                         ):
                             wait_processing_page_loaded.resolve()
 
-                    if result_url in data.request.url or processing_url in data.request.url:
+                    if result_url in data.request.url:
                         body = await data.body
                         body_text = body.decode("utf-8", errors="ignore")
                         if (
@@ -314,13 +381,16 @@ async def main():
                             and "Connection reset" not in body_text
                             and "This site can't be reached" not in body_text
                             and "Consulta em processamento" not in body_text
+                            and "main-container" in body_text
                         ):
+                            global result_html
                             wait_result_page_processing.resolve()
+                            result_html = body_text
 
                 if wait_pdf_download.is_resolved():
                     break
 
-                if wait_emit_page_processing.is_resolved() and wait_result_page_processing.is_resolved():
+                if wait_result_page_processing.is_resolved():
                     break
             except Exception:
                 pass
