@@ -65,28 +65,34 @@ async def submit_and_verify(driver, verify_url=True):
     retries = 0
 
     while retries < 10:
-        retries += 1
-        current_url = await driver.current_url
-        input_element = await driver.find_element(By.CSS_SELECTOR, "#NI")
-        await input_element.clear()
-        await move_mouse_around_element(driver, input_element, num_movements=1)
-        await type_with_delay(driver, input_element, doc)
-        submit_element = await driver.find_element(By.CSS_SELECTOR, "#validar")
-        await submit_element.click()
-        await driver.sleep(2)
-        if not verify_url:
-            return
-        new_url = await driver.current_url
-        if new_url != current_url:
-            return
-        await driver.refresh()
-        await driver.sleep(2)
+        try:
+            retries += 1
+            current_url = await driver.current_url
+            input_element = await driver.find_element(By.CSS_SELECTOR, "#NI")
+            await input_element.clear()
+            await move_mouse_around_element(driver, input_element, num_movements=1)
+            await type_with_delay(driver, input_element, doc)
+            submit_element = await driver.find_element(By.CSS_SELECTOR, "#validar")
+            await submit_element.click()
+            await driver.sleep(5)
+            if not verify_url:
+                return
+            new_url = await driver.current_url
+            if new_url != current_url:
+                return
+            await driver.refresh()
+            await driver.sleep(2)
+        except Exception:
+            await driver.refresh()
+            await driver.sleep(5)
 
     if retries >= 10:
         raise Exception("Failed to submit the form after multiple attempts")
 
 
-async def handle_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded):
+async def handle_page_errors(
+    driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded, wait_emit_page_processing
+):
     await driver.sleep(2)
     retries = 0
 
@@ -101,6 +107,10 @@ async def handle_page_errors(driver, wait_pdf_download, wait_result_page_process
 
             content = await driver.page_source
 
+            if wait_emit_page_processing.is_resolved():
+                if "O número informado não consta" in content:
+                    return
+
             if (
                 "ERR_CONNECTION_RESET" not in content
                 and "Connection reset" not in content
@@ -111,7 +121,7 @@ async def handle_page_errors(driver, wait_pdf_download, wait_result_page_process
             print("Connection error, retrying...")
             retries += 1
             await driver.refresh()
-            await driver.sleep(5 + retries)
+            await driver.sleep(5)
         except Exception:
             pass
 
@@ -119,7 +129,7 @@ async def handle_page_errors(driver, wait_pdf_download, wait_result_page_process
         raise Exception("Failed to load page")
 
 
-async def handle_result_page_errors(driver, wait_pdf_download, wait_result_page_processing):
+async def handle_result_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_emit_page_processing):
     await driver.sleep(3)
     retries = 0
 
@@ -128,6 +138,11 @@ async def handle_result_page_errors(driver, wait_pdf_download, wait_result_page_
 
         if wait_pdf_download.is_resolved() or wait_result_page_processing.is_resolved():
             return
+
+        if wait_emit_page_processing.is_resolved():
+            content = await driver.page_source
+            if "O número informado não consta" in content:
+                return
 
         current_url = await driver.current_url
 
@@ -143,7 +158,7 @@ async def handle_result_page_errors(driver, wait_pdf_download, wait_result_page_
 
         print("Result page error, retrying...")
         await driver.refresh()
-        await driver.sleep(5 + retries)
+        await driver.sleep(5)
 
     if retries >= 10:
         raise Exception("Failed to download PDF")
@@ -192,10 +207,12 @@ def extract_message_from_html(html):
         return "No message found."
 
 
-async def get_result_infos(driver, wait_pdf_download, wait_result_page_processing, result=None):
+async def get_result_infos(
+    driver, wait_pdf_download, wait_result_page_processing, wait_emit_page_processing, result=None
+):
     global result_html
     print("Getting result infos...")
-    await handle_result_page_errors(driver, wait_pdf_download, wait_result_page_processing)
+    await handle_result_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_emit_page_processing)
 
     if wait_pdf_download.is_resolved():
         print("pdf promise resolved...")
@@ -217,7 +234,19 @@ async def get_result_infos(driver, wait_pdf_download, wait_result_page_processin
             "obs": message,
             "file": None,
         }
-    print(f"result: {result}")
+
+    if wait_emit_page_processing.is_resolved():
+        print("emit page promise resolved...")
+        main_container = await driver.find_element(By.CSS_SELECTOR, "#rfb-main-container > div")
+        text = await main_container.text
+        message = extract_message(text)
+
+        return {
+            "document": doc,
+            "obs": message,
+            "file": None,
+        }
+
     return result
 
 
@@ -275,7 +304,10 @@ async def get_page_response(
     wait_processing_page_loaded,
 ):
     await submit_and_verify(driver)
-    await handle_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded)
+
+    await handle_page_errors(
+        driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded, wait_emit_page_processing
+    )
 
     first_response = await race(
         wait_for_element(driver, By.CSS_SELECTOR, "input[id='ans'][name='answer']", "image_captcha"),
@@ -284,7 +316,9 @@ async def get_page_response(
     )
 
     if first_response == "result_page":
-        result = await get_result_infos(driver, wait_pdf_download, wait_result_page_processing)
+        result = await get_result_infos(
+            driver, wait_pdf_download, wait_result_page_processing, wait_emit_page_processing
+        )
         wait_page_response.resolve(result)
         return
 
@@ -292,7 +326,9 @@ async def get_page_response(
         await solve_image_captcha(driver)
         captcha_response = await race(wait_emit_page_processing, is_result_page(driver))
         if captcha_response == "result_page":
-            result = await get_result_infos(driver, wait_pdf_download, wait_result_page_processing)
+            result = await get_result_infos(
+                driver, wait_pdf_download, wait_result_page_processing, wait_emit_page_processing
+            )
             wait_page_response.resolve(result)
             return
 
@@ -306,9 +342,11 @@ async def get_page_response(
     if second_response == "emit_link":
         await click_and_check("a[href*='Emitir/EmProcessamento']", driver)
 
-    await handle_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded)
+    await handle_page_errors(
+        driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded, wait_emit_page_processing
+    )
 
-    result = await get_result_infos(driver, wait_pdf_download, wait_result_page_processing)
+    result = await get_result_infos(driver, wait_pdf_download, wait_result_page_processing, wait_emit_page_processing)
     wait_page_response.resolve(result)
     return
 
@@ -327,7 +365,9 @@ async def main():
     await driver.get(url, wait_load=True)
     await driver.sleep(0.5)
 
-    await handle_page_errors(driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded)
+    await handle_page_errors(
+        driver, wait_pdf_download, wait_result_page_processing, wait_processing_page_loaded, wait_emit_page_processing
+    )
 
     async with NetworkInterceptor(
         driver,
@@ -361,6 +401,11 @@ async def main():
                             and "Consulta em processamento" not in body_text
                         ):
                             wait_emit_page_processing.resolve()
+                            if "O número informado não consta" in body_text:
+                                await data.resume()
+                                await driver.sleep(2)
+                                await wait_for_element(driver, By.CSS_SELECTOR, "#rfb-main-container > div", "none")
+                                break
 
                     if processing_url in data.request.url:
                         body = await data.body
